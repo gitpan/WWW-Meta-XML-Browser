@@ -1,5 +1,7 @@
 Revision history for Perl extension WWW::Meta::XML::Browser.
 
+0.06  Fri Nov 14 13:17:43 CET 2003
+	- fixed a serious bug concerning HTML-parsing
 0.05  Tue Aug 26 22:37:38 CEST 2003
 	- added the possibility to define callbacks in the XML file
 	- added the meta-element to the DTD, together with some child

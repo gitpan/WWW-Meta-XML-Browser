@@ -28,10 +28,10 @@ The following requests can be build using results from the transformation.
 
 The most important part when working with C<WWW::Meta::XML::Browser> is to write a session description file. Such a file describes which http requests are made and how the results of the requests are handled.
 
-The session description file is a simple XML file. The root element is E<lt>www-meta-xml-browserE<gt> and the DTD can be found at L<http://www.boksa.de/pub/xml/dtd/www-meta-xml-browser_v0.05.dtd>, which leads us to the following construct:
+The session description file is a simple XML file. The root element is E<lt>www-meta-xml-browserE<gt> and the DTD can be found at L<http://www.boksa.de/pub/xml/dtd/www-meta-xml-browser_v0.06.dtd>, which leads us to the following construct:
 
   <?xml version="1.0" ?>
-  <!DOCTYPE www-meta-xml-browser SYSTEM "http://www.boksa.de/pub/xml/dtd/www-meta-xml-browser_v0.05.dtd">
+  <!DOCTYPE www-meta-xml-browser SYSTEM "http://www.boksa.de/pub/xml/dtd/www-meta-xml-browser_v0.06.dtd">
   <www-meta-xml-browser>
   <!-- ... -->
   </www-meta-xml-browser>
@@ -227,7 +227,7 @@ our @EXPORT = qw(
 	
 );
 
-our $VERSION = '0.05';
+our $VERSION = '0.06';
 
 use HTTP::Cookies;
 use HTTP::Request;
@@ -341,7 +341,10 @@ sub process_url {
 	my $source = LWP::UserAgent::get($url);
 	&{$this->{debug_callback}}(1, "LWP::UserAgent::get($url) succeeded") if $this->{debug};
 
-	my $doc = $this->{xml_parser}->parse_html_string($source);
+	my $parser = XML::LibXML->new();
+	$parser->recover(1);
+	my $doc = $parser->parse_html_string($source);
+	
 	&{$this->{debug_callback}}(1, "parse_html_string() succeeded") if $this->{debug};
 
 	$this->process_xml_doc($doc);
@@ -500,7 +503,13 @@ sub process_request_node {
 				&{$this->{debug_callback}}(1, "result callback called: ".$result_callback."(\$res->content())") if $this->{debug};
 								
 				if ($callback = $this->_read_callback($result_callback)) {
+
+					my $t0 = [Time::HiRes::gettimeofday()] if $this->{debug};
+
 					$result = &{$callback}($res->content());			
+					
+					&{$this->{debug_callback}}(3, "time to process callback \"".$result_callback."\": ".Time::HiRes::tv_interval($t0)) if $this->{debug};
+
 					$doc = $this->process_result($result, $r_node->getAttribute($STYLESHEET_ATTRIBUTE));							
 				}
 				else {
@@ -576,7 +585,7 @@ sub process_content_nodeset {
 
 =item make_request($url, $method, $content);
 
-Makes a request to C<$url> sending the C<$content> using C<$method> and returns the result.
+Makes a request to C<$url> sending the C<$content> using C<$method> and returns the result. If a username and a password have bee specified within the url, they will be used for HTTP-Basic authentication if necessary.
 
 =cut
 
@@ -584,10 +593,23 @@ sub make_request {
 	my $this = shift;
 	my ($url, $method, $content) = @_;
 
+	my $username = undef;
+	my $password = undef;
+
+	if ($url =~ /^(http:\/\/)(.+?):(.+?)\@(.+)$/) {
+		my $username	= $2;
+		my $password	= $3;
+		my $url			= $1.$4;
+	}
+
 	&{$this->{debug_callback}}(1, "make_request() called") if $this->{debug};
 	&{$this->{debug_callback}}(2, "url:     ".$url) if $this->{debug};
 	&{$this->{debug_callback}}(2, "content: ".$content) if $this->{debug};
 	&{$this->{debug_callback}}(2, "method:  ".$method) if $this->{debug};
+
+	if (defined($username) && defined($password)) {
+		&{$this->{debug_callback}}(2, "authorization:  ".$username." ".$password) if $this->{debug};
+	}
 
 	my $t0 = [Time::HiRes::gettimeofday()] if $this->{debug};
 	
@@ -601,7 +623,11 @@ sub make_request {
 		$req->content_type('application/x-www-form-urlencoded');
 		$req->content($content);
 	}
-	
+
+	if (defined($username) && defined($password)) {
+		$req->authorization($username => $password)
+	}
+		
 	my $res = $this->{ua}->request($req);
 	
 	&{$this->{debug_callback}}(2, "time:    ".Time::HiRes::tv_interval($t0)) if $this->{debug};
@@ -658,6 +684,7 @@ sub process_result {
 
 	# create a parser for the result
 	my $parser = XML::LibXML->new();
+	$parser->recover(1);
 
 	# parse the html and generate the result doc
 	$doc = $parser->parse_html_string($result);
@@ -931,7 +958,7 @@ __END__
 =head1 SEE ALSO
 
 The DTD for the session description files can be found at:
-  L<http://www.boksa.de/pub/xml/dtd/www-meta-xml-browser_v0.05.dtd>
+  L<http://www.boksa.de/pub/xml/dtd/www-meta-xml-browser_v0.06.dtd>
 
 Documentation and a HOWTO can be found at:
   L<http://www.boksa.de/perl/modules/www-meta-xml-browser/>

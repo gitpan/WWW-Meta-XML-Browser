@@ -28,20 +28,53 @@ The following requests can be build using results from the transformation.
 
 The most important part when working with C<WWW::Meta::XML::Browser> is to write a session description file. Such a file describes which http requests are made and how the results of the requests are handled.
 
-The session description file is a simple XML file. The root element is E<lt>meta-sessionE<gt> and so the DTD is to be found at L<http://www.boksa.de/pub/xml/dtd/meta-session.dtd>, which leads us to the following construct:
+The session description file is a simple XML file. The root element is E<lt>www-meta-xml-browserE<gt> and the DTD can be found at L<http://www.boksa.de/pub/xml/dtd/www-meta-xml-browser_v0.05.dtd>, which leads us to the following construct:
 
   <?xml version="1.0" ?>
-  <!DOCTYPE meta-session SYSTEM "http://www.boksa.de/pub/xml/dtd/meta-session.dtd">
-  <meta-session>
+  <!DOCTYPE www-meta-xml-browser SYSTEM "http://www.boksa.de/pub/xml/dtd/www-meta-xml-browser_v0.05.dtd">
+  <www-meta-xml-browser>
   <!-- ... -->
-  </meta-session>
+  </www-meta-xml-browser>
+
+The optional meta-element can be specified as a child of the root element. The element acts as a container for different information regarding the handling of the request elements.
+
+=head3 META-PERL INFORMATION
+
+The perl element is a child of the meta element and can contain perl related information. The perl element can have one of the child elements described below.
+
+=head4 ELEMENT: callback; ATTRIBUTES: name
+
+The callback element is used to define an anonymous subroutine which can later be used as a callback. The name under which the callback can be accessed is specified by the required name attribut. The form of the callback (parameters, return value) depends on the later usage, an example for a (not very useful :-)) result-callback is the following:
+
+  <callback name="some-callback"><![CDATA[
+  sub {
+    my ($result) = @_;
+
+    return $result;
+  }
+  ]]></callback>
+
+
+=head3 REQUEST DEFINITIONS
+
+A session description file must contain at least one request.
+
+=head4 DEFINING A REQUEST WITHOUT CONTENT
 
 Under the root element we will add some elements for the requests we want to make. A very complete request will look like the following:
 
-  <request url="http://www.google.de/" method="get" stylesheet="google-index.xsl">
+  <request url="http://www.google.de/" method="get" stylesheet="google-index.xsl" result-callback="some-callback">
   </request>
 
-The only attribute of the request-element that is required is url, all other attributes can be left out. If method is left out the default method get will be used. If stylesheet is left out, the raw html will be transformed to a valid XML document which will than be stored as the result of that request.
+The only attribute of the request-element that is required is url, all other attributes can be left out.
+
+If method is left out the default method get will be used.
+
+If stylesheet is left out, the raw html will be transformed to a valid XML document which will than be stored as the result of that request.
+
+The result-callback gives the user the possibility to change the raw html before it will be transformed to a XML document by calling the specified callback. This callback can be an element of the callbacks hash specified when the instance is created or a callback specified in the XML file (L<ELEMENT: callback; ATTRIBUTES: name>). If a callback is specified in the callbacks hash as well as in the XML file the callback from the hash will be used. A result callback is called with the raw html as the only parameter and is required to return a valid html document.
+
+=head4 DEFINING A REQUEST WITH CONTENT
 
 The request-element has an optional child element, which can be used to specify the content of a request. The element is called content and is used as a child of the request element as follows (remember that & has to be written as &amp; in XML):
 
@@ -50,8 +83,6 @@ The request-element has an optional child element, which can be used to specify 
   </request>
 
 This example shows that the content will be sent using the specified method (get in this case) to the url of the request (http://www.google.de/search).
-
-A session description file must contain at least on request.
 
 =head3 REPLACEMENT EXPRESSIONS IN A SESSION DESCRIPTION FILE
 
@@ -111,10 +142,14 @@ When the debug option is set, the module produces a lot of debug output about ex
 C<\&debug> has to be a pointer to a subroutine taking two parameters. The first parameter is a number >= 0 which describes the logging level. The second parameter is the string which is the message to be printed.
 Please note that there is a default routine L<_debug()>.
 
-  result_callback => \&result
+  result_doc_callback => \&result
 
 C<\&result> has to be a pointer to a subroutine taking one parameter. The parameter is an instance of C<XML::LibXML::Document> and can be manipulated. The subroutine must return an instance of C<XML::LibXML::Document>.
 Please note that there is a default routine L<_result()>.
+
+  callbacks => \%callbacks
+
+C<\%callbacks> is a pointer to a hash of references to subroutines. These subroutines can be used in various situations during the processing of the XML file.
 
 =head2 PROCESSING A SESSION DESCRIPTION FILE
 
@@ -192,7 +227,7 @@ our @EXPORT = qw(
 	
 );
 
-our $VERSION = '0.04';
+our $VERSION = '0.05';
 
 use HTTP::Cookies;
 use HTTP::Request;
@@ -203,19 +238,27 @@ use XML::LibXML;
 use XML::LibXSLT;
 
 
+my $ROOT_XPATH					= '/www-meta-xml-browser';
 
-my $REQUEST_XPATH			= '/meta-session/request';
-my $AUTHORIZATION_XPATH		= './authorization';
-my $CONTENT_XPATH			= './content';
+my $META_XPATH					= $ROOT_XPATH.'/meta';
+my $PERL_META_XPATH				= $META_XPATH.'/perl';
+my $CALLBACK_XPATH				= $PERL_META_XPATH.'/callback';
 
-my $XPATH_REGEXP			= '\#(escape)*\{(\d+?):(.*?):(.+?)\}';
-my $ARGS_REGEXP				= '\#(escape)*\{args:(.*?)\}';
+my $REQUEST_XPATH				= $ROOT_XPATH.'/request';
+my $AUTHORIZATION_XPATH			= './authorization';
+my $CONTENT_XPATH				= './content';
 
-my $URL_ATTRIBUTE			= 'url';
-my $METHOD_ATTRIBUTE		= 'method';
-my $STYLESHEET_ATTRIBUTE	= 'stylesheet';
+my $XPATH_REGEXP				= '\#(escape)*\{(\d+?):(.*?):(.+?)\}';
+my $ARGS_REGEXP					= '\#(escape)*\{args:(.*?)\}';
 
-my $XML_VERSION				= '1.0';
+my $URL_ATTRIBUTE				= 'url';
+my $METHOD_ATTRIBUTE			= 'method';
+my $RESULT_CALLBACK_ATTRIBUTE	= 'result-callback';
+my $STYLESHEET_ATTRIBUTE		= 'stylesheet';
+
+my $CALLBACK_NAME_ATTRIBUTE		= 'name';
+
+my $XML_VERSION					= '1.0';
 
 =head1 METHODS
 
@@ -233,15 +276,17 @@ This class method contructs a new C<WWW::Meta::XML::Browser> object and returns 
 
 The hash C<%options> can be used to control the behaviour of the module and to provide some data to it as well. At the moment the following Key/Value pairs are supported:
 
-  KEY:                VALUE:       DESCRIPTION:
-  ---------------     --------     -------------
-  args	              \%args       a pointer to a hash of arguments which can be used in
-                                   requests
-  debug               0/1          a boolean true or boolean false value can be passed to
-                                   the module to control weather debugging information are
-                                   printed or not
-  debug_callback      \&debug      a pointer to a debug-callback
-  result_callback     \&result     a pointer to a result-callback
+  KEY:                    VALUE:          DESCRIPTION:
+  ---------------         -----------     -------------
+  args	                  \%args          a pointer to a hash of arguments which can be used in
+                                          requests
+  debug                   0/1             a boolean true or boolean false value can be passed to
+                                          the module to control weather debugging information are
+                                          printed or not
+  debug_callback          \&debug         a pointer to a debug-callback
+  result_doc_callback     \&result        a pointer to a result-doc-callback
+  callbacks               \%callbacks     a pointer to a hash of subroutines which can be used as
+                                          callbacks in different situations
 
 =cut
 
@@ -254,24 +299,28 @@ sub new {
 	bless $this, $type;
 
 	$this->{debug_callback} = \&_debug;
-	$this->{result_callback} = \&_result;
+	$this->{result_doc_callback} = \&_result;
+	$this->{callbacks} = {};
 	
 	$this->{args} = $cnf{'args'} if $cnf{'args'};		
 	$this->{debug} = 1 if $cnf{'debug'};
 	$this->{debug_callback} = $cnf{'debug_callback'} if $cnf{'debug_callback'};
-	$this->{result_callback} = $cnf{'result_callback'} if $cnf{'result_callback'};
+	$this->{result_doc_callback} = $cnf{'result_doc_callback'} if $cnf{'result_doc_callback'};
+	$this->{callbacks} = $cnf{'callbacks'} if $cnf{'callbacks'};
 
 	$this->{request_nodes} = ();
 
 	$this->{request_results} = ();
 
-	$this->{ua} = LWP::UserAgent->new(cookie_jar => HTTP::Cookies->new());
+	$this->{ua} = LWP::UserAgent->new(cookie_jar => HTTP::Cookies->new(), requests_redirectable => ['GET', 'POST', 'HEAD']);
 	&{$this->{debug_callback}}(0, "LWP::UserAgent created") if $this->{debug};
 
 	$this->{xml_parser} = XML::LibXML->new();
 	$this->{xml_parser}->validation(1);
 	$this->{xml_parser}->load_ext_dtd(1);
 	&{$this->{debug_callback}}(0, "XML::LibXML-Parser created") if $this->{debug};
+	
+	$this->{xml_doc} = undef;
 		
 	return $this;
 }
@@ -346,6 +395,9 @@ Takes the given XML ocument and reads the request-nodes in the XML file. These r
 sub process_xml_doc {
 	my $this = shift;
 	my ($doc) = @_;
+
+	&{$this->{debug_callback}}(0, "xml_doc stored") if $this->{debug};
+	$this->{xml_doc} = $doc;
 
 	&{$this->{debug_callback}}(0, "process_xml_doc() called") if $this->{debug};
 	my $r_nodeset = $doc->findnodes($REQUEST_XPATH);
@@ -440,8 +492,23 @@ sub process_request_node {
 			
 			$res = $this->make_request($url, $r_node->getAttribute($METHOD_ATTRIBUTE), $content);		
 
-			if ($res) {	
-				$doc = $this->process_result($res, $r_node->getAttribute($STYLESHEET_ATTRIBUTE));
+			my $result_callback = $r_node->getAttribute($RESULT_CALLBACK_ATTRIBUTE);
+
+			if ($res && $result_callback) {
+				my ($result, $callback);
+			
+				&{$this->{debug_callback}}(1, "result callback called: ".$result_callback."(\$res->content())") if $this->{debug};
+								
+				if ($callback = $this->_read_callback($result_callback)) {
+					$result = &{$callback}($res->content());			
+					$doc = $this->process_result($result, $r_node->getAttribute($STYLESHEET_ATTRIBUTE));							
+				}
+				else {
+					$doc = $this->process_result_doc($res, $r_node->getAttribute($STYLESHEET_ATTRIBUTE));
+				}
+			}
+			elsif ($res) {	
+				$doc = $this->process_result_doc($res, $r_node->getAttribute($STYLESHEET_ATTRIBUTE));
 			}
 			
 			if ($doc) {
@@ -544,7 +611,7 @@ sub make_request {
 	}
 	elsif ($res->is_redirect()) {
 		warn "Redirect (".$res->code().") to \"".$res->headers->header('Location')."\"\n";
-#		return $this->make_request($res->headers->header('Location'), 'get', '');
+		return 0;
 	}
 	else {
 		warn "Error (".$res->code().") while processing request result from ".$method."-request to ".$url." with content ".$content."\n";
@@ -554,9 +621,25 @@ sub make_request {
 
 
 
-=item $doc = process_result($res, $stylesheet);
+=item $doc = process_result_doc($res, $stylesheet);
 
 Processes the result (C<$res>) as returned by L<make_request()> by transforming it into a XML document.
+Internally L<process_result()> is called with C<$res>->content() and C<$stylesheet>.
+
+=cut
+
+sub process_result_doc {
+	my $this = shift;	
+	my ($res, $stylesheet) = @_;
+
+	return $this->process_result($res->content(), $stylesheet);
+}
+
+
+
+=item $doc = process_result($result, $stylesheet);
+
+Processes the result-string (C<$result>) by transforming it into a XML document.
 If a XSL-Stylesheet (C<$stylesheet>) has been specified for the given request the XML document will be transformed using that stylesheet.
 The resulting XML document is then returned.
 
@@ -564,7 +647,7 @@ The resulting XML document is then returned.
 
 sub process_result {
 	my $this = shift;	
-	my ($res, $stylesheet) = @_;
+	my ($result, $stylesheet) = @_;
 
 	&{$this->{debug_callback}}(1, "process_result() called") if $this->{debug};
 		
@@ -577,7 +660,7 @@ sub process_result {
 	my $parser = XML::LibXML->new();
 
 	# parse the html and generate the result doc
-	$doc = $parser->parse_html_string($res->content());
+	$doc = $parser->parse_html_string($result);
 
 	&{$this->{debug_callback}}(2, "time to parse html:       ".Time::HiRes::tv_interval($t0)) if $this->{debug};
 
@@ -596,7 +679,7 @@ sub process_result {
 		&{$this->{debug_callback}}(2, "time to transform result: ".Time::HiRes::tv_interval($t0)) if $this->{debug};
 	}
 	
-	return &{$this->{result_callback}}($doc);	
+	return &{$this->{result_doc_callback}}($doc);	
 }
 
 
@@ -778,24 +861,55 @@ sub parse_string {
 
 
 
+=item $callback = _read_callback($result_callback);
+
+Reads the callback from the callbacks hash or from the XML file and returns a reference to it. If the callback can not be found 'undef' is returned. 
+
+=cut
+
+sub _read_callback {
+	my $this = shift;
+	my ($result_callback) = @_;
+	
+	if (ref($this->{callbacks}->{$result_callback}) eq 'CODE') {
+		&{$this->{debug_callback}}(2, "read result callback \"".$result_callback."\" from callback hash") if $this->{debug};
+		return $this->{callbacks}->{$result_callback};
+	}
+	else {
+		my $perl = $this->{xml_doc}->findvalue($CALLBACK_XPATH."[\@".$CALLBACK_NAME_ATTRIBUTE." = '".$result_callback."']");	
+		eval('$this->{callbacks}->{$result_callback} = '.$perl.';');
+
+		if (ref($this->{callbacks}->{$result_callback}) eq 'CODE') {
+			&{$this->{debug_callback}}(2, "installed result callback \"".$result_callback."\" from XML file in callback hash") if $this->{debug};
+			return $this->_read_callback($result_callback);
+		}
+		else {
+			&{$this->{debug_callback}}(2, "callback \"".$result_callback."\" was not found") if $this->{debug};
+			return undef;
+		}
+	}
+}
+
+
+
 =item _debug($l, $msg);
 
-Default debug-callback. Prints C<$msg> as a debugging message. C<$l> gives information about the logging level. 
+Default debug-callback. Prints C<$msg> as a debugging message to STDERR. C<$l> gives information about the logging level. 
 
 =cut
 
 sub _debug {
 	my ($l, $msg) = @_;	
 
-	print "   " x $l;
-	print "DEBUG: ".$msg."\n";
+	print STDERR "   " x $l;
+	print STDERR "DEBUG: ".$msg."\n";
 }
 
 
 
 =item $doc = _result($doc);
 
-Default result-callback. Just returns C<$doc> as it was passed to the subroutine.
+Default result-doc-callback. Just returns C<$doc> as it was passed to the subroutine.
 
 =cut
 
@@ -817,7 +931,7 @@ __END__
 =head1 SEE ALSO
 
 The DTD for the session description files can be found at:
-  L<http://www.boksa.de/pub/xml/dtd/meta-session.dtd>
+  L<http://www.boksa.de/pub/xml/dtd/www-meta-xml-browser_v0.05.dtd>
 
 Documentation and a HOWTO can be found at:
   L<http://www.boksa.de/perl/modules/www-meta-xml-browser/>

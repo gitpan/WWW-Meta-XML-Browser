@@ -28,10 +28,10 @@ The following requests can be build using results from the transformation.
 
 The most important part when working with C<WWW::Meta::XML::Browser> is to write a session description file. Such a file describes which http requests are made and how the results of the requests are handled.
 
-The session description file is a simple XML file. The root element is E<lt>www-meta-xml-browserE<gt> and the DTD can be found at L<http://www.boksa.de/pub/xml/dtd/www-meta-xml-browser_v0.06.dtd>, which leads us to the following construct:
+The session description file is a simple XML file. The root element is E<lt>www-meta-xml-browserE<gt> and the DTD can be found at L<http://www.boksa.de/pub/xml/dtd/www-meta-xml-browser_v0.07.dtd>, which leads us to the following construct:
 
   <?xml version="1.0" ?>
-  <!DOCTYPE www-meta-xml-browser SYSTEM "http://www.boksa.de/pub/xml/dtd/www-meta-xml-browser_v0.06.dtd">
+  <!DOCTYPE www-meta-xml-browser SYSTEM "http://www.boksa.de/pub/xml/dtd/www-meta-xml-browser_v0.07.dtd">
   <www-meta-xml-browser>
   <!-- ... -->
   </www-meta-xml-browser>
@@ -83,6 +83,14 @@ The request-element has an optional child element, which can be used to specify 
   </request>
 
 This example shows that the content will be sent using the specified method (get in this case) to the url of the request (http://www.google.de/search).
+
+=head4 EMBEDDED REQUESTS
+
+Embedded request can be used to fetch pages from a result page. They can be created in the XSL stylesheet to dynamically parse a tree of pages. 
+
+As soon as a www-meta-xml-browser-request-element is created in the XSL stylesheet it is processed like a normal request-element and the result is inserted.
+
+If the result consists of multiple pages the container-attribute has to be specified and is used as the new root for the merged (optionally transformed) pages.
 
 =head3 REPLACEMENT EXPRESSIONS IN A SESSION DESCRIPTION FILE
 
@@ -180,7 +188,7 @@ After the session description file has been processed as shown above, the reques
   $browser->process_all_request_nodes();
                    -or-
   while (my $r_node = $browser->get_next_request_node()) {
-    $browser->process_request_node($r_node);
+    $subrequest_result = $browser->process_request_node($r_node);
   }
 
 L<process_all_request_nodes()> encapsulates the second construction with the while loop.
@@ -227,8 +235,9 @@ our @EXPORT = qw(
 	
 );
 
-our $VERSION = '0.06';
+our $VERSION = '0.07';
 
+use Digest::MD5;
 use HTTP::Cookies;
 use HTTP::Request;
 use LWP::UserAgent;
@@ -237,28 +246,32 @@ use URI::Escape;
 use XML::LibXML;
 use XML::LibXSLT;
 
+my $ROOT_XPATH								= '/www-meta-xml-browser';
 
-my $ROOT_XPATH					= '/www-meta-xml-browser';
+my $META_XPATH								= $ROOT_XPATH.'/meta';
+my $PERL_META_XPATH							= $META_XPATH.'/perl';
+my $CALLBACK_XPATH							= $PERL_META_XPATH.'/callback';
 
-my $META_XPATH					= $ROOT_XPATH.'/meta';
-my $PERL_META_XPATH				= $META_XPATH.'/perl';
-my $CALLBACK_XPATH				= $PERL_META_XPATH.'/callback';
+my $REQUEST_XPATH							= $ROOT_XPATH.'/request';
+my $AUTHORIZATION_XPATH						= './authorization';
+my $CONTENT_XPATH							= './content';
 
-my $REQUEST_XPATH				= $ROOT_XPATH.'/request';
-my $AUTHORIZATION_XPATH			= './authorization';
-my $CONTENT_XPATH				= './content';
+my $XPATH_REGEXP							= '\#(escape)*\{(\d+?):(.*?):(.+?)\}';
+my $ARGS_REGEXP								= '\#(escape)*\{args:(.*?)\}';
 
-my $XPATH_REGEXP				= '\#(escape)*\{(\d+?):(.*?):(.+?)\}';
-my $ARGS_REGEXP					= '\#(escape)*\{args:(.*?)\}';
+my $URL_ATTRIBUTE							= 'url';
+my $METHOD_ATTRIBUTE						= 'method';
+my $RESULT_CALLBACK_ATTRIBUTE				= 'result-callback';
+my $STYLESHEET_ATTRIBUTE					= 'stylesheet';
 
-my $URL_ATTRIBUTE				= 'url';
-my $METHOD_ATTRIBUTE			= 'method';
-my $RESULT_CALLBACK_ATTRIBUTE	= 'result-callback';
-my $STYLESHEET_ATTRIBUTE		= 'stylesheet';
+my $CALLBACK_NAME_ATTRIBUTE					= 'name';
 
-my $CALLBACK_NAME_ATTRIBUTE		= 'name';
+my $EMBEDDED_REQUEST_CONTAINER_ATTRIBUTE	= 'container';
 
-my $XML_VERSION					= '1.0';
+my $XML_VERSION								= '1.0';
+
+my $USER_AGENT								= "WWW::Meta::XML::Browser ".$VERSION;
+my $TIMEOUT									= 30;
 
 =head1 METHODS
 
@@ -313,6 +326,8 @@ sub new {
 	$this->{request_results} = ();
 
 	$this->{ua} = LWP::UserAgent->new(cookie_jar => HTTP::Cookies->new(), requests_redirectable => ['GET', 'POST', 'HEAD']);
+	$this->{ua}->agent($USER_AGENT);
+	$this->{ua}->timeout($TIMEOUT);
 	&{$this->{debug_callback}}(0, "LWP::UserAgent created") if $this->{debug};
 
 	$this->{xml_parser} = XML::LibXML->new();
@@ -438,20 +453,20 @@ sub process_all_request_nodes {
 	my $this = shift;
 
 	while (my $r_node = $this->get_next_request_node()) {
-		$this->process_request_node($r_node);
+			push(@{$this->{request_results}}, $this->process_request_node($r_node));
 	}
 }
 
 
 
-=item process_request_node($r_node);
+=item $subrequest_result = process_request_node($r_node);
 
 Processes the request node. This subroutine does the actual work:
 It generates all permutations of the url
 It genarates all permutations of the content
 It generates all permutations ot the url and the content
 It makes the requests and processes the results
-it stores the (optionally transformed) results
+it returns the (optionally transformed) results
 
 =cut
 
@@ -527,7 +542,7 @@ sub process_request_node {
 
 	}
 
-	push(@{$this->{request_results}}, \@subrequest_result);
+	return \@subrequest_result;
 }
 
 
@@ -546,14 +561,31 @@ sub process_content_nodeset {
 	my @content;
 		
 	foreach my $c_node ($c_nodeset->get_nodelist()) {
-		my @raw_content = split(/&/, $c_node->string_value());
 		
+		my $content = $c_node->string_value();
+		
+		# strip all whitespaces
+		$content =~ s/\s*//gs;
+		
+		# strip leading '&'s
+		$content =~ s/^&*//gs;
+		
+		my $ctx = Digest::MD5->new();
+		$ctx->add($content);
+        my $digest = $ctx->b64digest();
+        
+        $content =~ s/&amp;/$digest/gis;
+        
+		my @raw_content = split(/&/, $content);		
+
 		foreach my $pair (@raw_content) {
+			$pair  =~ s/$digest/&amp;/gis;
+			
 			my ($name, $value);
-				
-			if ($pair =~ /=/) {		
-				($name, $value) = split(/=/, $pair);
-				
+			
+			if ($pair =~ /(.+?)=(.*)/) {					
+				($name, $value) = ($1, $2);
+								
 				if (($value !~ /$XPATH_REGEXP/) && ($value !~ /$ARGS_REGEXP/)) {
 					$value = uri_escape($value);
 				}
@@ -641,6 +673,7 @@ sub make_request {
 	}
 	else {
 		warn "Error (".$res->code().") while processing request result from ".$method."-request to ".$url." with content ".$content."\n";
+		warn $res->content()."\n";
 		return 0;
 	}
 }
@@ -692,7 +725,7 @@ sub process_result {
 	&{$this->{debug_callback}}(2, "time to parse html:       ".Time::HiRes::tv_interval($t0)) if $this->{debug};
 
 	# if a stylesheet has been specified use it to transform the result doc
-	if ($stylesheet) {
+	if ($stylesheet) {	
 		my $t0 = [Time::HiRes::gettimeofday()] if $this->{debug};
 
 		my $style_doc = $parser->parse_file($stylesheet);
@@ -705,8 +738,53 @@ sub process_result {
 
 		&{$this->{debug_callback}}(2, "time to transform result: ".Time::HiRes::tv_interval($t0)) if $this->{debug};
 	}
-	
+
+
+
+	# processing embedded requests after having applied the stylesheet if it has been specified
+	my $doc_string = $doc->toString();
+
+
+	my $contains_embedded_request = 0;
+	if ($doc_string =~ /(<www-meta-xml-browser-request.*?\/>)/gis) {
+		$doc_string =~ s/(<www-meta-xml-browser-request.*?\/>)/$this->process_embedded_request($parser->parse_string($1)->getDocumentElement())/egis;
+		$contains_embedded_request = 1;
+	}
+	if ($doc_string =~ /(<www-meta-xml-browser-request.*?>.+?<\/www-meta-xml-browser-request>)/gis) {
+		$doc_string =~ s/(<www-meta-xml-browser-request.*?>.+?<\/www-meta-xml-browser-request>)/$this->process_embedded_request($parser->parse_string($1)->getDocumentElement())/egis;
+		$contains_embedded_request = 1;
+	}
+
+	if ($contains_embedded_request) {
+		$doc = $parser->parse_string($doc_string);
+	}
+
 	return &{$this->{result_doc_callback}}($doc);	
+}
+
+
+
+=item $xml_string = process_embedded_request($embedded_request_node);
+
+Processes an embedded request node, by processing it as a normal node (using L<process_request_node()>).
+If the embedded request node returns only one XML document it is transformed to a string and returned.
+If the embedded request node returns more than one XML documents they are merged unded the name specified by the C<$EMBEDDED_REQUEST_CONTAINER_ATTRIBUTE>-attribute of the embedded requst node.
+
+=cut 
+
+sub process_embedded_request {
+	my $this = shift;
+	my ($er_node) = @_;
+	
+	my $subrequest_result = $this->process_request_node($er_node);
+
+	if (scalar(@{$subrequest_result}) > 1) {
+		my $doc = $this->merge_xml_array($subrequest_result, $er_node->getAttribute($EMBEDDED_REQUEST_CONTAINER_ATTRIBUTE));		
+		return $doc->documentElement()->toString();
+	}
+	else {
+		return ${$subrequest_result}[0]->documentElement()->toString();
+	}
 }
 
 
@@ -771,7 +849,7 @@ sub print_request_result {
 
 =item merge_subrequests($request_index, $wrapper_name);
 
-Merges the subrequest of the request (specified by C<$request_index>) in a new XML document which consists of a new root element (C<$wrapper_name>) and all the subrequests as childs of this root element.
+Merges the subrequest of the request (specified by C<$request_index>) in a new XML document which consists of a new root element (C<$wrapper_name>) and all the subrequests as children of this root element.
 
 =cut
 
@@ -779,19 +857,34 @@ sub merge_subrequests {
 	my $this = shift;
 	my ($request_index, $wrapper_name) = @_;
 
+	my $doc = $this->merge_xml_array($this->{request_results}->[$request_index], $wrapper_name);
+	
+	my @doc = ($doc);
+	$this->{request_results}->[$request_index] = \@doc;
+}
+
+
+
+=item merge_xml_array($array, $wrapper_name)
+
+Merges the XML documents in C<@{$array}> by building a new XML document with a new root element (C<$wrapper_name>) and the XML documents in C<@{$array}> as children of the root element.
+
+=cut
+
+sub merge_xml_array {
+	my $this = shift;
+	my ($array, $wrapper_name) = @_;
+
 	my $root = XML::LibXML::Element->new($wrapper_name);
 
-	my @subrequests = @{$this->{request_results}->[$request_index]};
-	
-	foreach my $subrequest (@subrequests) {
-		$root->appendChild($subrequest->documentElement());
+	foreach my $xml (@{$array}) {
+		$root->appendChild($xml->documentElement());
 	}
 
 	my $doc = XML::LibXML->createDocument($XML_VERSION);
 	$doc->setDocumentElement($root);
 
-	my @doc = ($doc);
-	$this->{request_results}->[$request_index] = \@doc;
+	return $doc;
 }
 
 
@@ -958,7 +1051,7 @@ __END__
 =head1 SEE ALSO
 
 The DTD for the session description files can be found at:
-  L<http://www.boksa.de/pub/xml/dtd/www-meta-xml-browser_v0.06.dtd>
+  L<http://www.boksa.de/pub/xml/dtd/www-meta-xml-browser_v0.07.dtd>
 
 Documentation and a HOWTO can be found at:
   L<http://www.boksa.de/perl/modules/www-meta-xml-browser/>

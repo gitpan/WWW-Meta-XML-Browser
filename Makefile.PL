@@ -6,6 +6,7 @@ WriteMakefile(
     'NAME'		=> 'WWW::Meta::XML::Browser',
     'VERSION_FROM'	=> 'Browser.pm', # finds $VERSION
     'PREREQ_PM'		=> {
+        'Digest::MD5'		=> '0',
         'HTTP::Cookies'		=> '0',
         'HTTP::Request'		=> '0',
         'LWP::UserAgent'	=> '0',

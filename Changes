@@ -1,5 +1,8 @@
 Revision history for Perl extension WWW::Meta::XML::Browser.
 
+0.07  Thu Mar 11 10:18:37 CET 2004
+	- introduced embedded requests, a powerful feature to parse a tree of pages and produces one xml document
+	- added examples
 0.06  Fri Nov 14 13:17:43 CET 2003
 	- fixed a serious bug concerning HTML-parsing
 0.05  Tue Aug 26 22:37:38 CEST 2003

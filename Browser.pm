@@ -28,10 +28,10 @@ The following requests can be build using results from the transformation.
 
 The most important part when working with C<WWW::Meta::XML::Browser> is to write a session description file. Such a file describes which http requests are made and how the results of the requests are handled.
 
-The session description file is a simple XML file. The root element is E<lt>www-meta-xml-browserE<gt> and the DTD can be found at L<http://www.boksa.de/pub/xml/dtd/www-meta-xml-browser_v0.07.dtd>, which leads us to the following construct:
+The session description file is a simple XML file. The root element is E<lt>www-meta-xml-browserE<gt> and the DTD can be found at L<http://www.boksa.de/pub/xml/dtd/www-meta-xml-browser_v0.08.dtd>, which leads us to the following construct:
 
   <?xml version="1.0" ?>
-  <!DOCTYPE www-meta-xml-browser SYSTEM "http://www.boksa.de/pub/xml/dtd/www-meta-xml-browser_v0.07.dtd">
+  <!DOCTYPE www-meta-xml-browser SYSTEM "http://www.boksa.de/pub/xml/dtd/www-meta-xml-browser_v0.08.dtd">
   <www-meta-xml-browser>
   <!-- ... -->
   </www-meta-xml-browser>
@@ -235,7 +235,7 @@ our @EXPORT = qw(
 	
 );
 
-our $VERSION = '0.07';
+our $VERSION = '0.08';
 
 use Digest::MD5;
 use HTTP::Cookies;
@@ -572,7 +572,7 @@ sub process_content_nodeset {
 		
 		my $ctx = Digest::MD5->new();
 		$ctx->add($content);
-        my $digest = $ctx->b64digest();
+        my $digest = $ctx->hexdigest();
         
         $content =~ s/&amp;/$digest/gis;
         
@@ -1051,7 +1051,7 @@ __END__
 =head1 SEE ALSO
 
 The DTD for the session description files can be found at:
-  L<http://www.boksa.de/pub/xml/dtd/www-meta-xml-browser_v0.07.dtd>
+  L<http://www.boksa.de/pub/xml/dtd/www-meta-xml-browser_v0.08.dtd>
 
 Documentation and a HOWTO can be found at:
   L<http://www.boksa.de/perl/modules/www-meta-xml-browser/>

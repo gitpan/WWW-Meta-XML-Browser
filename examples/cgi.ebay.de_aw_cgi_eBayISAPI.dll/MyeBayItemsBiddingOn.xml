@@ -1,5 +1,5 @@
 <?xml version="1.0" ?>
-<!DOCTYPE www-meta-xml-browser SYSTEM "http://www.boksa.de/pub/xml/dtd/www-meta-xml-browser_v0.07.dtd">
+<!DOCTYPE www-meta-xml-browser SYSTEM "http://www.boksa.de/pub/xml/dtd/www-meta-xml-browser_v0.08.dtd">
 <www-meta-xml-browser>
 	<request url="http://cgi.ebay.de/aw-cgi/eBayISAPI.dll" method="get">
 		<content><![CDATA[MyeBayItemsBiddingOn]]></content>

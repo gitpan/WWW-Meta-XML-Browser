@@ -1,5 +1,7 @@
 Revision history for Perl extension WWW::Meta::XML::Browser.
 
+0.08  Mon Mar 22 22:33:49 CET 2004
+	- bugfix: changed the type of hash used in replacements of certain entities to avoid problems with regular expressions
 0.07  Thu Mar 11 10:18:37 CET 2004
 	- introduced embedded requests, a powerful feature to parse a tree of pages and produces one xml document
 	- added examples

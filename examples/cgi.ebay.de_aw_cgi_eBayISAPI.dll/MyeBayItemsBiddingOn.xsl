@@ -92,8 +92,27 @@
 					<mein-hoechstgebot><xsl:value-of select="$TR/td[5]"/></mein-hoechstgebot>
 					<anzahl><xsl:value-of select="$TR/td[6]"/></anzahl>
 					<verkaeufer><xsl:value-of select="$TR/td[7]/a"/></verkaeufer>
-					<status><xsl:value-of select="$TR/td[8]"/></status>
-					<bewertung-url><xsl:value-of select="$TR/td[9]/a/@href"/></bewertung-url>
+										
+					<xsl:choose>
+						<xsl:when test="contains($TR/td[8]/a/img[2]/@src, 'paynow.gif')">
+							<status>Bezahlung und Versand</status>
+							<status-url><xsl:value-of select="$TR/td[8]/a/@href"/></status-url>
+						</xsl:when>
+						<xsl:when test="$TR/td[8]/a">
+							<status><xsl:value-of select="$TR/td[8]/a"/></status>
+							<status-url><xsl:value-of select="$TR/td[8]/a/@href"/></status-url>
+						</xsl:when>
+						<xsl:otherwise><status><xsl:value-of select="$TR/td[8]"/></status></xsl:otherwise>
+					</xsl:choose>
+
+					<xsl:choose>
+						<xsl:when test="$TR/td[9]/a">
+							<bewertung><xsl:value-of select="$TR/td[9]/a"/></bewertung>
+							<bewertung-url><xsl:value-of select="$TR/td[9]/a/@href"/></bewertung-url>
+						</xsl:when>
+						<xsl:otherwise><bewertung><xsl:value-of select="$TR/td[9]"/></bewertung></xsl:otherwise>
+					</xsl:choose>
+										
 				</artikel>
 
 			</xsl:for-each>
